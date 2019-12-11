@@ -1,0 +1,174 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from glob import glob
+from PIL import Image
+
+
+# Keras Libraries
+import keras
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from keras.preprocessing.image import ImageDataGenerator, load_img
+
+from sklearn.metrics import roc_auc_score, roc_curve, accuracy_score, recall_score, confusion_matrix, classification_report
+
+
+# getting folders
+pwd=os.getcwd()
+print(pwd)
+mainDIR = os.listdir('chest_xray/')
+print(mainDIR)
+
+train_folder= 'chest_xray/train/'
+val_folder = 'chest_xray/val/'
+test_folder = 'chest_xray/test/'
+
+# train 
+os.listdir(train_folder)
+train_n = train_folder+'NORMAL/'
+train_p = train_folder+'PNEUMONIA/'
+
+
+# looking at samples, randomly chose image #55 for both
+plt.figure(1, figsize = (10, 6))
+plt.subplot(1, 2, 1)
+img = glob(train_n+"/*.jpeg")
+img = np.asarray(plt.imread(img[55]))
+plt.title("Normal CXR")
+plt.imshow(img)
+
+plt.figure(1, figsize = (10, 6))
+plt.subplot(1, 2, 2)
+img = glob(train_p+"/*.jpeg")
+img = np.asarray(plt.imread(img[55]))
+plt.title("Pneumonia CXR")
+plt.imshow(img)
+
+plt.show()
+
+
+# CNN model
+
+cnn = Sequential()
+
+#Convolution
+cnn.add(Conv2D(32, (3, 3), activation="relu", input_shape=(64, 64, 3)))
+
+#Pooling
+cnn.add(MaxPooling2D(pool_size = (2, 2)))
+
+# 2nd Convolution
+cnn.add(Conv2D(32, (3, 3), activation="relu"))
+
+# 2nd Pooling layer
+cnn.add(MaxPooling2D(pool_size = (2, 2)))
+
+# Flatten the layer
+cnn.add(Flatten())
+
+# Fully Connected Layers and Dropouts between
+cnn.add(Dense(activation = 'relu', units = 128))
+cnn.add(Dropout(0.5))
+cnn.add(Dense(activation = 'sigmoid', units = 1))
+
+# Compile the Neural network
+cnn.compile(optimizer = 'adam', loss = 'binary_crossentropy', metrics = ['accuracy',f1_m,precision_m, recall_m])
+
+
+# Fitting the CNN to the images
+# The function ImageDataGenerator augments your image by iterating through image as your CNN is getting ready to process that image
+# only training data augmented.
+train_datagen = ImageDataGenerator(rescale = 1./255,
+                                   shear_range = 0.2,
+                                   zoom_range = 0.2,
+                                   horizontal_flip = True)
+
+test_datagen = ImageDataGenerator(rescale = 1./255)  #Image normalization.
+
+training_set = train_datagen.flow_from_directory('../input/chest_xray/chest_xray/train',
+                                                 target_size = (64, 64),
+                                                 batch_size = 32,
+                                                 class_mode = 'binary')
+
+validation_generator = test_datagen.flow_from_directory('../input/chest_xray/chest_xray/val/',
+    target_size=(64, 64),
+    batch_size=32,
+    class_mode='binary')
+
+test_set = test_datagen.flow_from_directory('../input/chest_xray/chest_xray/test',
+                                            target_size = (64, 64),
+                                            batch_size = 32,
+                                            class_mode = 'binary')
+
+
+#view cnn model
+cnn.summary()
+
+
+#fitting. history
+cnn_model = cnn.fit_generator(training_set,
+                         steps_per_epoch = 163,
+                         epochs = 10,
+                         validation_data = validation_generator,
+                         validation_steps = 624)
+
+
+
+#evaluate
+
+test_accu = cnn.evaluate_generator(test_set,steps=624)
+print('testing accuracy:',test_accu)
+print('testing loss is :',val_loss)
+print('testing recall is :',val_recall_1)
+
+
+#accuracy over time
+plt.plot(cnn_model.history['acc'])
+plt.plot(cnn_model.history['val_acc'])
+plt.title('Model Accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend(['Training acc', 'Test acc'], loc='upper left')
+plt.show()
+
+#loss function over time
+plt.plot(cnn_model.history['val_loss'])
+plt.plot(cnn_model.history['loss'])
+plt.title('Model Loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Training loss', 'Test loss'], loc='upper left')
+plt.show()
+
+
+#probabilities
+
+y_test_prob = cnn.predict_generator(test_set, verbose=True, steps=624)
+
+index_array = y_test_prob>0.5  #standard decision boundary
+index_array_1d = np.reshape(index_array,-1)
+y_test_pred = np.zeros(len(y_test_prob), dtype=int)
+y_test_pred[index_array_1d] = 1 #y_test_pred is a binary value (0 or 1) 
+y_test_pred[-10:]
+
+y_test_true = test_set.classes # the test_generator classes attribute provides an array of classes for for each instance
+type(y_test_true)
+
+print("Accuracy on the test set: {:.3f}".format(accuracy_score(y_test_true,y_test_pred)))
+print("Recall on the test set: {:.3f}".format(recall_score(y_test_true,y_test_pred)))
+print("Precision on the test set: {:.3f}".format(precision_score(y_test_true,y_test_pred)))
+
+#ROC
+fpr, tpr, thresholds = roc_curve(y_test_true,y_test_prob)
+plt.plot(fpr, tpr, label="ROC Curve")
+plt.xlabel("FPR")
+plt.ylabel("TPR (recall)")
+plt.legend(loc=4)
+
+print("ROC AUC score on the test set: {:.3f}".format(roc_auc_score(y_test_true,y_test_prob)))
+confusion_matrix(y_test_true, y_test_pred)
+
+print("f1 score on the test set: {:.3f}".format(f1_score(y_test_true,y_test_pred)))
+
+
